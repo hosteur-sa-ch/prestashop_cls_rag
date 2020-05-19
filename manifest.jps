@@ -1,0 +1,109 @@
+type: install
+version: 1.0
+name: PrestaShop 
+displayName: PrestaShop Cluster (1.7.6.5)
+homepage: https://www.prestashop.com/
+logo: https://www.prestashop.com/sites/all/themes/prestashop/images/preston-logo@2x.png
+ssl: true
+
+globals:
+  PATH: https://raw.githubusercontent.com/hosteur-sa-ch/prestashop_cls_rag/master/
+  DB_USER: jelastic-${fn.random}
+  DB_PASS: ${fn.password(20)}
+  PRESTASHOP_PASS: ${fn.password(20)}
+
+nodes:
+  - nodeType: nginx
+    count: 1
+    cloudlets: 8
+    nodeGroup: bl
+    displayName: Load balancer
+
+  - nodeType: nginxphp
+    count: 2
+    cloudlets: 8
+    nodeGroup: cp
+    links: sqldb:DB
+    displayName: "AppServer"
+    volumes:
+      - /var/www/webroot/ROOT
+    volumeMounts:
+      /var/www/webroot/ROOT:
+        sourcePath: /data
+        sourceNodeGroup: storage
+        readOnly: false
+
+  - nodeType: storage
+    cloudlets: 8
+    nodeGroup: storage
+    displayName: Storage
+
+  - nodeType: mysql
+    count: 2
+    cloudlets: 8
+    nodeGroup: sqldb
+    displayName: Database
+
+onAfterScaleOut [cp]:
+  forEach(event.response.nodes):
+    cmd [${@i.id}]: sudo service nginx reload
+    setNodeDisplayName [${@i.id}]: AppServer
+
+onAfterScaleOut [bl]:
+  forEach(event.response.nodes):
+    setNodeDisplayName [${@i.id}]: Load balancer
+
+onInstall:
+  - log: Auto Scaling Triggers
+  - script: ${globals.PATH}/scripts/addTriggers.js
+
+  - log: DB Multi-Master Cluster Setup
+  - install:
+      jps: https://raw.githubusercontent.com/jelastic-jps/mysql-cluster/master/scripts/multimaster-configuration.jps
+      settings:
+        db_user: ${globals.DB_USER}
+        db_pass: ${globals.DB_PASS}
+        custom_conf: https://raw.githubusercontent.com/hosteur-sa-ch/prestashop_cls_rag/master/configs/mysql/mysql.cnf
+
+  - log: CP Layer Setup
+  - forEach(nodes.cp):
+      setupNode:
+        nodeId: ${@i.id}
+
+  - log: Download and unpack PrestaShop
+  - cmd[storage]:
+    - cd /tmp
+    - wget https://github.com/PrestaShop/PrestaShop/releases/download/1.7.6.5/prestashop_1.7.6.5.zip && unzip *.zip
+    - mv prestashop.zip /data && cd /data && unzip prestashop.zip && rm prestashop.zip
+    - wget ${globals.PATH}/config/db_slave_server.inc.php -O /data/config/db_slave_server.inc.php   # https://dh42.com/blog/prestashop-slave-databases/
+    - sed -i "s/DBUSER/${globals.DB_USER}/g" /data/config/db_slave_server.inc.php
+    - sed -i "s/DBPASS/${globals.DB_PASS}/g" /data/config/db_slave_server.inc.php
+    - sed -i "s/\$rand = 'admin'/\$rand = 'ps-admin';\/\//g" /data/controllers/admin/AdminLoginController.php
+    - chown 700:700 -R /data
+
+  - log: Install PrestaShop
+  - cmd[${nodes.cp[0].id}]:
+     - cd /var/www/webroot/ROOT
+     - php install/index_cli.php --db_create=1 --domain=${env.domain} --db_server=DB --db_name=prestashop --db_user=${globals.DB_USER} --db_password=${globals.DB_PASS} --email=${user.email} --password=${globals.PRESTASHOP_PASS}
+     - rm -r install/
+     # Doc for PrestaShop CLI installer : http://doc.prestashop.com/display/PS16/Installing+PrestaShop+using+the+command-line+script
+
+actions:
+  setupNode:
+    cmd[${this.nodeId}]:
+      - wget https://raw.githubusercontent.com/hosteur-sa-ch/prestashop_cls_rag/master//configs/nginx/nginx.conf -O /etc/nginx/nginx.conf
+      - wget ${globals.PATH}/config/nginx.conf -O /etc/nginx/conf.d/default.conf
+      - echo -e "extension=gd.so\nextension=memcached.so" >> /etc/php.ini
+      - sudo service php-fpm reload
+      - sudo service nginx reload
+
+success: |
+  # PrestaShop installed
+  Your PrestaShop has been installed on [${env.domain}](https://${env.domain}).
+
+  > On the first connection, you need to use this link to access to the admin dashboard : [${env.domain}/admin](https://${env.domain}/admin).
+  > Then, you can use this one : [${env.domain}/ps-admin](https://${env.domain}/ps-admin).
+
+  **E-mail:** ${user.email}
+
+  **Password:**  ${globals.PRESTASHOP_PASS}
