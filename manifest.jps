@@ -1,6 +1,10 @@
 type: install
-version: 1.0
-name: PrestaShop 
+version: 1.1
+name: PrestaShop Cluster
+id: prestashop-cluster
+categories:
+  - apps/clusters
+  - apps/content-management
 displayName: PrestaShop Cluster (1.7.6.5)
 homepage: https://www.prestashop.com/
 logo: https://www.prestashop.com/sites/all/themes/prestashop/images/preston-logo@2x.png
@@ -19,7 +23,8 @@ nodes:
     nodeGroup: bl
     displayName: Load balancer
 
-  - nodeType: nginxphp
+  - nodeType: nginxphp-dockerized
+    tag: 1.16.1-php-7.2.29
     count: 2
     cloudlets: 8
     nodeGroup: cp
@@ -38,7 +43,7 @@ nodes:
     nodeGroup: storage
     displayName: Storage
 
-  - nodeType: mysql
+  - nodeType: mysql5
     count: 2
     cloudlets: 8
     nodeGroup: sqldb
@@ -75,7 +80,7 @@ onInstall:
     - cd /tmp
     - wget https://github.com/PrestaShop/PrestaShop/releases/download/1.7.6.5/prestashop_1.7.6.5.zip && unzip *.zip
     - mv prestashop.zip /data && cd /data && unzip prestashop.zip && rm prestashop.zip
-    - wget ${globals.PATH}/config/db_slave_server.inc.php -O /data/config/db_slave_server.inc.php   # https://dh42.com/blog/prestashop-slave-databases/
+    - wget ${globals.PATH}/configs/db_slave_server.inc.php -O /data/config/db_slave_server.inc.php   # https://dh42.com/blog/prestashop-slave-databases/
     - sed -i "s/DBUSER/${globals.DB_USER}/g" /data/config/db_slave_server.inc.php
     - sed -i "s/DBPASS/${globals.DB_PASS}/g" /data/config/db_slave_server.inc.php
     - sed -i "s/\$rand = 'admin'/\$rand = 'ps-admin';\/\//g" /data/controllers/admin/AdminLoginController.php
